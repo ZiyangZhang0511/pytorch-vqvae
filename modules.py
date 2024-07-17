@@ -68,7 +68,7 @@ class VAE(nn.Module):
 
 
 class VQEmbedding(nn.Module):
-    def __init__(self, K, D):
+    def __init__(self, K, D): ### K = 512, D = 256
         super().__init__()
         self.embedding = nn.Embedding(K, D)
         self.embedding.weight.data.uniform_(-1./K, 1./K)
@@ -78,15 +78,15 @@ class VQEmbedding(nn.Module):
         latents = vq(z_e_x_, self.embedding.weight)
         return latents
 
-    def straight_through(self, z_e_x):
-        z_e_x_ = z_e_x.permute(0, 2, 3, 1).contiguous()
-        z_q_x_, indices = vq_st(z_e_x_, self.embedding.weight.detach())
-        z_q_x = z_q_x_.permute(0, 3, 1, 2).contiguous()
+    def straight_through(self, z_e_x): ### z_e_x with (B, C:256, H: 32, W: 32)
+        z_e_x_ = z_e_x.permute(0, 2, 3, 1).contiguous() ### z_e_x_ with (B, H:32, W:32, C:256)
+        z_q_x_, indices = vq_st(z_e_x_, self.embedding.weight.detach()) ### z_q_x_ with (B, 32, 32, 256), indices (B*32*32)
+        z_q_x = z_q_x_.permute(0, 3, 1, 2).contiguous() ### z_q_x with (B, 256, 32, 32)
 
         z_q_x_bar_flatten = torch.index_select(self.embedding.weight,
-            dim=0, index=indices)
-        z_q_x_bar_ = z_q_x_bar_flatten.view_as(z_e_x_)
-        z_q_x_bar = z_q_x_bar_.permute(0, 3, 1, 2).contiguous()
+            dim=0, index=indices) ### z_q_x_bar_flatten with (B*32*32, 256)
+        z_q_x_bar_ = z_q_x_bar_flatten.view_as(z_e_x_) ### z_q_x_bar_ with (B, H:32, W:32, C:256)
+        z_q_x_bar = z_q_x_bar_.permute(0, 3, 1, 2).contiguous() ### z_q_x_bar with (B, 256, 32, 32)
 
         return z_q_x, z_q_x_bar
 
@@ -96,7 +96,7 @@ class ResBlock(nn.Module):
         super().__init__()
         self.block = nn.Sequential(
             nn.ReLU(True),
-            nn.Conv2d(dim, dim, 3, 1, 1),
+            nn.Conv2d(dim, dim, 3, 1, 1), ### keep input spatial size the same
             nn.BatchNorm2d(dim),
             nn.ReLU(True),
             nn.Conv2d(dim, dim, 1),
@@ -108,15 +108,15 @@ class ResBlock(nn.Module):
 
 
 class VectorQuantizedVAE(nn.Module):
-    def __init__(self, input_dim, dim, K=512):
+    def __init__(self, input_dim, dim, K=512): ### input_dim = 3, dim = 256, K = 512
         super().__init__()
         self.encoder = nn.Sequential(
-            nn.Conv2d(input_dim, dim, 4, 2, 1),
+            nn.Conv2d(input_dim, dim, 4, 2, 1), ### (256, 64, 64)
             nn.BatchNorm2d(dim),
             nn.ReLU(True),
-            nn.Conv2d(dim, dim, 4, 2, 1),
+            nn.Conv2d(dim, dim, 4, 2, 1), ### (256, 32, 32)
             ResBlock(dim),
-            ResBlock(dim),
+            ResBlock(dim), ### (256, 32, 32)
         )
 
         self.codebook = VQEmbedding(K, dim)
@@ -145,8 +145,8 @@ class VectorQuantizedVAE(nn.Module):
         return x_tilde
 
     def forward(self, x):
-        z_e_x = self.encoder(x)
-        z_q_x_st, z_q_x = self.codebook.straight_through(z_e_x)
+        z_e_x = self.encoder(x) #### x is images with (B, C:3, H:128, W:128),  z_e_x with (B, C:256, H: 32, W: 32)
+        z_q_x_st, z_q_x = self.codebook.straight_through(z_e_x) ### z_q_x_st, z_q_x with (B, 256, 32, 32)
         x_tilde = self.decoder(z_q_x_st)
         return x_tilde, z_e_x, z_q_x
 
